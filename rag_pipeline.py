@@ -9,9 +9,7 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_classic.chains.combine_documents import create_stuff_documents_chain
 from langchain_classic.chains import create_retrieval_chain
-from langchain_core.prompts import ChatPromptTemplate
-from langchain_classic.chains.combine_documents import create_stuff_documents_chain
-from langchain_classic.chains import create_retrieval_chain
+
 import logging
 
 # Load API key from .env file
