@@ -9,10 +9,32 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_classic.chains.combine_documents import create_stuff_documents_chain
 from langchain_classic.chains import create_retrieval_chain
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_classic.chains.combine_documents import create_stuff_documents_chain
+from langchain_classic.chains import create_retrieval_chain
+import logging
 
 # Load API key from .env file
 load_dotenv()
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
+
+# LLM created once - not inside function
+llm = ChatGoogleGenerativeAI(
+    model="gemini-2.5-flash",
+    google_api_key=GOOGLE_API_KEY,
+    temperature=0.3
+)
+
+# Prompt created once - not inside function
+prompt = ChatPromptTemplate.from_template("""
+You are a banking compliance assistant. 
+Use the following context to answer the question accurately.
+If you don't know the answer, say you don't know.
+Keep answers concise and factual.
+
+Context: {context}
+Question: {input}
+""")
 
 def get_embeddings():
     return GoogleGenerativeAIEmbeddings(
@@ -75,34 +97,22 @@ def load_vector_store():
     return vectorstore
 
 def ask_question(vectorstore, question):
-    print(f"\nQuestion: {question}")
+    try:
+        logging.info(f"Question received: {question}")
+        
+        retriever = vectorstore.as_retriever(
+            search_kwargs={"k": 3}
+        )
+        document_chain = create_stuff_documents_chain(llm, prompt)
+        retrieval_chain = create_retrieval_chain(
+            retriever, document_chain
+        )
+        
+        response = retrieval_chain.invoke({"input": question})
+        
+        logging.info("Answer generated successfully")
+        return response['answer']
     
-    llm = ChatGoogleGenerativeAI(
-        model="gemini-2.5-flash",
-        google_api_key=GOOGLE_API_KEY,
-        temperature=0.3
-    )
-    
-    # Modern LangChain approach - replaces deprecated RetrievalQA
-    retriever = vectorstore.as_retriever(search_kwargs={"k": 3})
-    
-    # Create prompt template
-    from langchain_core.prompts import ChatPromptTemplate
-    from langchain_classic.chains.combine_documents import create_stuff_documents_chain
-    from langchain_classic.chains import create_retrieval_chain
-
-    prompt = ChatPromptTemplate.from_template("""
-    You are a banking compliance assistant. 
-    Use the following context to answer the question accurately.
-    If you don't know the answer, say you don't know.
-    Keep answers concise and factual.
-    
-    Context: {context}
-    Question: {input}
-    """)
-    
-    document_chain = create_stuff_documents_chain(llm, prompt)
-    retrieval_chain = create_retrieval_chain(retriever, document_chain)
-    
-    response = retrieval_chain.invoke({"input": question})
-    return response['answer']
+    except Exception as e:
+        logging.error(f"Error generating answer: {e}")
+        raise
