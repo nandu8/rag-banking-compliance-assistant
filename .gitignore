@@ -1,4 +1,22 @@
+# Secrets
 .env
+
+# Vector database (re-generated via /setup)
 chroma_db/
+
+# Python
 venv/
 __pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+
+# Logs
+*.log
+
+# OS
+.DS_Store
+Thumbs.db

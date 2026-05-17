@@ -5,8 +5,11 @@ from rag_pipeline import load_and_chunk_document, create_vector_store, load_vect
 
 app = FastAPI()
 
+
 class Question(BaseModel):
     query: str
+    provider: str | None = None
+
 
 @app.post("/setup")
 async def setup():
@@ -15,17 +18,18 @@ async def setup():
     create_vector_store(chunks)
     return {"message": "Vector store created successfully!"}
 
+
 @app.post("/ask")
 async def ask(question: Question):
     vectorstore = load_vector_store()
-    answer = ask_question(vectorstore, question.query)
+    answer = ask_question(vectorstore, question.query, provider=question.provider)
     return {
         "question": question.query,
-        "answer": answer
+        "answer": answer,
+        "provider": question.provider or os.getenv("LLM_PROVIDER", "gemini"),
     }
+
 
 @app.get("/health")
 async def health():
     return {"status": "Banking RAG API is running!"}
-
-

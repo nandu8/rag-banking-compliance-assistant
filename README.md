@@ -47,7 +47,9 @@ The rules for video KYC verification (V-CIP) are:
 |---|---|
 | Python | Core programming language |
 | LangChain | RAG pipeline orchestration |
-| Google Gemini AI | Language model for answer generation |
+| Google Gemini AI | LLM and embeddings (default provider) |
+| Anthropic Claude | Alternative LLM provider |
+| OpenAI GPT-4o | Alternative LLM and embedding provider |
 | ChromaDB | Vector database for semantic search |
 | FastAPI | REST API framework |
 | Uvicorn | ASGI web server |
@@ -66,7 +68,7 @@ RBI KYC PDF Document
         ↓
 [2. CHUNK]   Split into 500 character chunks with 50 char overlap
         ↓
-[3. EMBED]   Convert chunks to vectors using Gemini Embeddings
+[3. EMBED]   Convert chunks to vectors using configured embedding provider
         ↓
 [4. STORE]   Save vectors in ChromaDB (persisted to disk)
 
@@ -76,10 +78,26 @@ User Question via API
         ↓
 [5. SEARCH]  Semantic similarity search finds top 3 relevant chunks
         ↓
-[6. GENERATE] Gemini AI generates answer grounded in retrieved chunks
+[6. GENERATE] Configured LLM generates answer grounded in retrieved chunks
         ↓
 Precise, document-grounded answer returned
 ```
+
+### Multi-Provider Design
+
+```
+providers.py          ← Factory: get_llm(provider) / get_embeddings(provider)
+rag_pipeline.py       ← RAG logic, reads LLM_PROVIDER / EMBEDDING_PROVIDER env vars
+main.py               ← FastAPI endpoints, optional per-request provider override
+```
+
+Supported providers:
+
+| Provider | LLM | Embeddings |
+|---|---|---|
+| `gemini` | Gemini 2.5 Flash | Gemini Embedding 001 |
+| `anthropic` | Claude Sonnet 4.6 | ❌ (use gemini or openai) |
+| `openai` | GPT-4o | text-embedding-3-small |
 
 ---
 
@@ -91,12 +109,18 @@ Precise, document-grounded answer returned
 | POST | `/setup` | Load PDF, create embeddings, save to ChromaDB |
 | POST | `/ask` | Ask a compliance question |
 
-### Example Request
+### Example Requests
 
 ```bash
+# Default — uses LLM_PROVIDER from .env
 curl -X POST "http://127.0.0.1:8000/ask" \
      -H "Content-Type: application/json" \
      -d '{"query": "What documents are required for video KYC?"}'
+
+# Per-request provider override
+curl -X POST "http://127.0.0.1:8000/ask" \
+     -H "Content-Type: application/json" \
+     -d '{"query": "What documents are required for video KYC?", "provider": "anthropic"}'
 ```
 
 ### Example Response
@@ -104,7 +128,8 @@ curl -X POST "http://127.0.0.1:8000/ask" \
 ```json
 {
     "question": "What documents are required for video KYC?",
-    "answer": "For Video KYC (V-CIP), the customer must present their original Officially Valid Document (OVD) during the live video interaction..."
+    "answer": "For Video KYC (V-CIP), the customer must present their original Officially Valid Document (OVD) during the live video interaction...",
+    "provider": "gemini"
 }
 ```
 
@@ -113,8 +138,6 @@ curl -X POST "http://127.0.0.1:8000/ask" \
 ## Getting Started
 
 ### Option 1 — Run With Docker (Recommended)
-
-The easiest way to run this application. No Python installation or dependency setup required.
 
 **Pull and run from Docker Hub:**
 ```bash
@@ -150,7 +173,7 @@ ChromaDB data is persisted to your local machine via volume mounting. This means
 
 #### Prerequisites
 - Python 3.9+
-- Google Gemini API key (free at aistudio.google.com)
+- API key for at least one provider (Gemini is the default)
 
 #### Installation
 
@@ -166,6 +189,7 @@ source venv/bin/activate  # Mac/Linux
 
 # Install dependencies
 pip install langchain langchain-community langchain-google-genai \
+            langchain-anthropic langchain-openai \
             google-generativeai chromadb pypdf fastapi uvicorn \
             python-dotenv langchain-text-splitters langchain-classic
 ```
@@ -175,13 +199,21 @@ pip install langchain langchain-community langchain-google-genai \
 Create a `.env` file in the root directory:
 ```
 GOOGLE_API_KEY=your_gemini_api_key_here
+ANTHROPIC_API_KEY=your_anthropic_key_here   # optional
+OPENAI_API_KEY=your_openai_key_here         # optional
+
+# LLM used for answer generation: gemini | anthropic | openai
+LLM_PROVIDER=gemini
+
+# Embedding model (must stay consistent after /setup): gemini | openai
+EMBEDDING_PROVIDER=gemini
 ```
 
 #### Add Your Document
 
 Place the RBI KYC Master Directions PDF in the `data/` folder:
 ```
-data/rbi_kyc.pdf
+data/rbi_kyc_directions.pdf
 ```
 
 Download from: [RBI Official Website](https://www.rbi.org.in)
@@ -231,13 +263,14 @@ rag-banking-compliance-assistant/
 │
 ├── main.py              ← FastAPI application and API endpoints
 ├── rag_pipeline.py      ← RAG pipeline logic (load, chunk, embed, retrieve)
+├── providers.py         ← LLM and embedding provider factory (Gemini / Claude / OpenAI)
 ├── Dockerfile           ← Container configuration
 ├── .dockerignore        ← Files excluded from Docker image
 ├── requirements.txt     ← Python dependencies
-├── .env                 ← API keys (never committed to Git)
+├── .env                 ← API keys and provider config (never committed to Git)
 ├── .gitignore           ← Files excluded from Git
 └── data/
-    └── rbi_kyc.pdf      ← RBI KYC Master Directions document
+    └── rbi_kyc_directions.pdf  ← RBI KYC Master Directions document
 ```
 
 ---
@@ -247,11 +280,14 @@ rag-banking-compliance-assistant/
 **Why RAG over a standard LLM?**
 Standard LLMs give generic answers based on internet training data. RAG grounds every answer in the actual RBI document — critical for compliance accuracy in a regulated banking environment.
 
+**Why a provider abstraction?**
+`providers.py` centralises all provider-specific initialisation. Switching models or adding a new provider requires changes in exactly one place. The LangChain interface (`BaseChatModel`, `Embeddings`) means the rest of the pipeline is provider-agnostic.
+
 **Why ChromaDB?**
 Lightweight, runs locally, no infrastructure overhead. In a production banking environment this would be replaced with a scalable vector database like Pinecone or pgvector with proper access controls and high availability.
 
 **Why low temperature (0.3)?**
-Banking compliance requires factual precision, not creative responses. Low temperature keeps Gemini's answers accurate and consistent.
+Banking compliance requires factual precision, not creative responses. Low temperature keeps answers accurate and consistent regardless of provider.
 
 **Honest AI — no hallucination:**
 When the answer isn't in the document, the system says so rather than making up an answer. This is critical in a compliance context.
@@ -290,7 +326,7 @@ This project was built with the regulated banking environment in mind:
 
 ## Author
 
-Built as part of an AI engineering portfolio project demonstrating RAG implementation in a regulated banking context.
+Built as part of an AI engineering portfolio project demonstrating multi-provider RAG implementation in a regulated banking context.
 
 [![Docker Hub](https://img.shields.io/badge/Docker%20Hub-nanduks8%2Frag--banking--app-blue)](https://hub.docker.com/r/nanduks8/rag-banking-app)
 [![GitHub](https://img.shields.io/badge/GitHub-nandu8-black)](https://github.com/nandu8)

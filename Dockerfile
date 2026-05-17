@@ -13,6 +13,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Step 5 - Copy your project files
 COPY main.py .
 COPY rag_pipeline.py .
+COPY providers.py .
 COPY data/ ./data/
 
 # Step 6 - Expose the port uvicorn runs on
